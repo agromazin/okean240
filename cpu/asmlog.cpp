@@ -18,16 +18,10 @@
 #include <cstdint>
 #include <iomanip>
 #include <iostream>
-#include <fstream>
 #include "cpu.hpp"
 #include "asmlog.hpp"
 
-std::ofstream out("out.txt");
-
-bool flag = false;
-
 void Asmlog::init() {
-	std::cout.rdbuf(out.rdbuf());
 }
 
 template<class T>
@@ -44,9 +38,6 @@ void Asmlog::printDivider(int width)
 
 void Asmlog::log(uint16_t counter, const Cpu * cpu)
 {
-	if (!flag) {
-		return;
-	}
     auto opcode  = cpu -> opcode;
     auto command = cpu -> commands[opcode];
     

@@ -17,8 +17,8 @@ HINSTANCE hInst;                                // current instance
 WCHAR szTitle[MAX_LOADSTRING];                  // The title bar text
 WCHAR szWindowClass[MAX_LOADSTRING];            // the main window class name
 
-std::string monitor = "C:/work/project/OkeanEmu/okean240/emu/Okean240/MONITOR.BIN";
-std::string os = "C:/work/project/OkeanEmu/okean240/emu/Okean240/CPM80.BIN";
+std::string monitor;
+std::string os;
 
 // Forward declarations of functions included in this code module:
 ATOM                MyRegisterClass(HINSTANCE hInstance);
