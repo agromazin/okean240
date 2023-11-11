@@ -181,14 +181,23 @@ bool OkeanBus::isColorDisplay() {
 uint32_t paletteColor[8][4] = { 
 							  { 0x00000000, 0x00FF0000, 0x0000FF00, 0x000000FF }, 
 							  { 0x00FFFFFF, 0x00FF0000, 0x0000FF00, 0x000000FF },
-							  { 0x00FF0000, 0x0000FF00, 0x0000BFFF, 0x00FFFF00 },
-							  { 0x00000000, 0x00FF0000, 0x00FF00FF, 0x00FFFFFF },
-							  { 0x00000000, 0x00FF0000, 0x00FFFF00, 0x000000FF },
-							  { 0x00000000, 0x000000FF, 0x0000FF00, 0x00FFFF00 },
-							  { 0x0000FF00, 0x00FFFFFF, 0x00FFFF00, 0x000000FF },
+							  { 0x0000FF00, 0x00BF00FF, 0x00FF0000, 0x00FFFF00 },
+							  { 0x00000000, 0x0000FFFF, 0x0000FF00, 0x00FFFFFF },
+							  { 0x00000000, 0x00FFFF00, 0x0000FF00, 0x000000FF },
+							  { 0x00000000, 0x00FF0000, 0x000000FF, 0x00FFFF00 },
+							  { 0x00FF0000, 0x00FFFF00, 0x00FFFFFF, 0x000000FF },
 							  { 0x00000000, 0x00000000, 0x00000000, 0x00000000 },
 							};
-uint32_t paletteMono[] = { 0x00FFFFFF, 0x00000000 };
+uint32_t paletteMono[8][2] = { 
+	{ 0x00FFFFFF, 0x00000000},
+	{ 0x0000007F, 0x0000FF00},
+	{ 0x00FF0000, 0x007F0000},
+	{ 0x00CF00CF, 0x000000FF},
+	{ 0x00007F00, 0x00BF00FF},
+	{ 0x00004B96, 0x00FFFF00},
+	{ 0x00FF4000, 0x00000000},
+	{ 0x007F7F7F, 0x007F7F7F}
+};
 
 void OkeanBus::createColorBitmap(uint32_t *bitmapArray) {
 	uint8_t pal = read(0xE1) & 0x07;
@@ -218,6 +227,7 @@ void OkeanBus::createColorBitmap(uint32_t *bitmapArray) {
 }
 
 void OkeanBus::createMonoBitmap(uint32_t *bitmapArray) {
+	uint8_t pal = read(0xE1) & 0x07;
 	uint8_t mask = 1;
 	uint16_t updated_offset = read(0xC0);
 	uint32_t item = 0;
@@ -234,7 +244,7 @@ void OkeanBus::createMonoBitmap(uint32_t *bitmapArray) {
 				videoram += 0x100;
 				mask = 1;
 			}
-			bitmapArray[item++] = paletteMono[cl];
+			bitmapArray[item++] = paletteMono[pal][cl];
 		}
 	}
 }
