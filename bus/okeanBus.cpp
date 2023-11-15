@@ -1,7 +1,7 @@
 #include "okeanBus.h"
 #include "../bus/periphery.h"
 
-#define MEMORY_MAP_MASK 0x33
+#define MEMORY_MAP_MASK 0x37
 
 #include <thread>
 #ifdef _PTHREAD
@@ -99,6 +99,30 @@ void OkeanBus::RAM::configureMAP(uint8_t data) {
 		ram_map[1] = &EXT_RAM[BLOCK_SIZE];
 		ram_map[2] = &EXT_RAM[BLOCK_SIZE * 2];
 		ram_map[3] = &EXT_RAM[BLOCK_SIZE * 3];
+		break;
+	case MemoryMapTypeValue::EXT192_RAM1:
+		ram_map[0] = &EXT_RAM1[0];
+		ram_map[1] = &EXT_RAM1[BLOCK_SIZE];
+		ram_map[2] = &EXT_RAM1[BLOCK_SIZE * 2];
+		ram_map[3] = OS;
+		break;
+	case MemoryMapTypeValue::EXT192_RAM2:
+		ram_map[0] = &EXT_RAM1[BLOCK_SIZE * 2];
+		ram_map[1] = &EXT_RAM1[BLOCK_SIZE * 3];
+		ram_map[2] = &EXT_RAM1[BLOCK_SIZE * 2];
+		ram_map[3] = OS;
+		break;
+	case MemoryMapTypeValue::EXT192_RAM3:
+		ram_map[0] = &EXT_RAM2[0];
+		ram_map[1] = &EXT_RAM2[BLOCK_SIZE];
+		ram_map[2] = &EXT_RAM2[BLOCK_SIZE * 2];
+		ram_map[3] = OS;
+		break;
+	case MemoryMapTypeValue::EXT192_RAM4:
+		ram_map[0] = &EXT_RAM2[BLOCK_SIZE * 2];
+		ram_map[1] = &EXT_RAM2[BLOCK_SIZE * 3];
+		ram_map[2] = &EXT_RAM2[BLOCK_SIZE * 2];
+		ram_map[3] = OS;
 		break;
 	}
 }
@@ -353,8 +377,12 @@ void OkeanBus::loadData(std::string path, uint8_t* data, uint16_t size) {
 void OkeanBus::load(std::string motitor_path, std::string cpm_path) {
 	ram = std::make_shared<RAM>(shared_from_this());
 	cpu = std::make_shared<Cpu>();
-	loadData(motitor_path, ram->getMemoryBlock(OkeanBus::MemoryType::MONITOR), BLOCK_SIZE);
-	loadData(cpm_path, ram->getMemoryBlock(OkeanBus::MemoryType::OS), BLOCK_SIZE);
+	if (cpm_path == motitor_path) {
+		loadData(cpm_path, ram->getMemoryBlock(OkeanBus::MemoryType::OS), BLOCK_SIZE * 2);
+	} else {
+		loadData(motitor_path, ram->getMemoryBlock(OkeanBus::MemoryType::MONITOR), BLOCK_SIZE);
+		loadData(cpm_path, ram->getMemoryBlock(OkeanBus::MemoryType::OS), BLOCK_SIZE);
+	}
 }
 
 #define MASK_BLOCK 0x08
@@ -424,4 +452,218 @@ RecordPlayer::PlaySatus OkeanBus::getRecordPlayerStatus(double_t &percent) {
 	}
 	percent = p;
 	return status;
+}
+
+uint8_t* OkeanBus::getExtendedRAM(OkeanBus::ExtRAMBank bank) {
+	switch (bank) {
+	case OkeanBus::ExtRAMBank::BANK1:
+		return &ram->EXT_RAM[0];
+	case OkeanBus::ExtRAMBank::BANK2:
+		return &ram->EXT_RAM1[0];
+	case OkeanBus::ExtRAMBank::BANK3:
+		return &ram->EXT_RAM2[0];
+	}
+	return nullptr;
+}
+
+#define EMPTY_FSB 0xE5
+#define DIR_SIZE 1024
+#define RECORD_NUMBER 0x0C
+#define FSB_BLOCK_SIZE 32
+
+bool OkeanBus::getFileRecord(FSBRecord &record, uint8_t next, uint8_t numRecord, std::string fileName) {
+	uint8_t* dir = getExtendedRAM(ExtRAMBank::BANK1);
+	uint8_t currentFSB = 0;
+	uint8_t* endOfDir = dir + DIR_SIZE;
+	while (dir < endOfDir) {
+		if (*dir != EMPTY_FSB && *(dir + RECORD_NUMBER) == numRecord) {
+			if (numRecord != 0 || currentFSB == next) {
+				uint8_t name[13];
+				memcpy(name, dir + 1, 8);
+				uint8_t pos = 8;
+				name[pos] = 0;
+				pos--;
+				while (name[pos] == 0x20) {
+					name[pos] = 0;
+					pos--;
+				}
+				std::string fname(reinterpret_cast<char*>(&name[0]));
+				memcpy(name, dir + 9, 3);
+				name[3] = 0;
+				std::string fext(reinterpret_cast<char*>(&name[0]));
+				fname = fname + "." + fext;
+				if (fileName.empty() || fname == fileName) {
+					record.fileName = fname;
+					record.sizeInBlocks += *(dir + 15);
+					uint8_t bl = 0;
+					while (bl < 16 && *(dir + bl + 16) > 0) {
+						record.blocks.push_back(*(dir + bl + 16));
+						bl++;
+					}
+					if (*(dir + 15) == 0x80) {
+						getFileRecord(record, next, numRecord + 1, fname);
+					}
+					return true;
+				}
+			}
+			if (numRecord == 0) {
+				currentFSB++;
+			}
+		}
+		dir += FSB_BLOCK_SIZE;
+	}
+	return false;
+}
+
+uint8_t* OkeanBus::getPointerByBlock(uint8_t block) {
+	uint32_t  size = block * 1024;
+	uint8_t* offset = nullptr;
+	if (size <= BLOCK_SIZE * 4) {
+		offset = getExtendedRAM(ExtRAMBank::BANK1) + size;
+	} else {
+		size -= (BLOCK_SIZE * 4);
+		if (size <= BLOCK_SIZE * 4) {
+			offset = getExtendedRAM(ExtRAMBank::BANK2) + size;
+		} else {
+			size -= (BLOCK_SIZE * 4);
+			offset = getExtendedRAM(ExtRAMBank::BANK3) + size;
+		}
+	}
+	return offset;
+}
+
+void OkeanBus::copyFilesToHost(std::string path) {
+	uint8_t fileItem = 0;
+	bool flag = true;
+	while (flag) {
+		FSBRecord fsbRecord;
+		fsbRecord.fileName = "";
+		fsbRecord.sizeInBlocks = 0;
+		fsbRecord.blocks.clear();
+		if (flag = getFileRecord(fsbRecord, fileItem)) {
+			std::ofstream fileOut(path + "/" + fsbRecord.fileName, std::ios::out | std::ios::binary);
+			if (!fileOut.is_open()) {
+				exit(EXIT_FAILURE);
+				return;
+			}
+			uint8_t item = 0;
+			while (fsbRecord.sizeInBlocks > 0) {
+				uint8_t* ptr = getPointerByBlock(fsbRecord.blocks.at(item));
+				uint8_t wrBl = fsbRecord.sizeInBlocks * 128 > 0x400 ? 0x400 / 128 : fsbRecord.sizeInBlocks;
+				uint16_t len = wrBl * 128;
+				fileOut.write((const char*)ptr, len);
+				fsbRecord.sizeInBlocks -= wrBl;
+				item++;
+			}
+			fileOut.close();
+			fileItem++;
+		}
+	}
+}
+
+void OkeanBus::prepareEmptyBlocks(std::vector<uint8_t> &emptyFSB, std::vector<uint8_t> &emptyBlocks) {
+	emptyFSB.clear();
+	emptyBlocks.clear();
+	for (uint8_t i = 1; i < 192; i++) {
+		emptyBlocks.push_back(i);
+	}
+	uint8_t* dir = getExtendedRAM(ExtRAMBank::BANK1);
+	for (uint8_t i = 0; i < 32; i++) {
+		if (*dir != EMPTY_FSB) {
+			auto blocks = dir + 16;
+			for (uint8_t i = 0; i < 16; i++) {
+				auto nb = *blocks;
+				if (nb != 0) {
+					emptyBlocks.erase(std::remove_if(emptyBlocks.begin(), emptyBlocks.end(), [nb](unsigned char x) {
+						return x == nb; 
+					}));
+				}
+				blocks++;
+			}
+		} else {
+			emptyFSB.push_back(i);
+		}
+		dir += 32;
+	}
+}
+
+std::string OkeanBus::getFileName(std::string fullName) {
+	auto nm = fullName.find_last_of('/');
+	auto fileName = fullName;
+	if (nm == std::string::npos) {
+		nm = fullName.find_last_of('\\');
+	}
+	if (nm == std::string::npos) {
+		nm = fullName.find_last_of(':');
+	}
+	if (nm != std::string::npos) {
+		fileName = fullName.substr(nm+1);
+	}
+	return fileName;
+}
+
+void OkeanBus::copyFilesFromHost(std::string fileName) {
+	std::vector<uint8_t> emptyFSB;
+	std::vector<uint8_t> emptyBlocks;
+	prepareEmptyBlocks(emptyFSB, emptyBlocks);
+
+	std::ifstream file(fileName, std::ios::in | std::ios::binary);
+	if (file.is_open())
+	{
+		file.seekg(0, std::ios::end);
+		auto fileSize = file.tellg();
+		if (fileSize > 0) {
+			file.seekg(0, std::ios::beg);
+			auto buffer = new uint8_t[fileSize];
+			file.read((std::ifstream::char_type *) buffer, (std::streamsize) fileSize);
+			file.close();
+			uint8_t* dir = getExtendedRAM(ExtRAMBank::BANK1);
+			auto fn = getFileName(fileName);
+			auto curBuff = buffer;
+			uint8_t itemFsb = 0;
+			uint8_t itemBlock = 0;
+			bool force = false;
+			while (fileSize > 0 || force) {
+				force = false;
+				auto fsb = dir + emptyFSB.at(itemFsb) * 32;
+				memset(fsb, 0x00, 32);
+				memset(fsb + 1, 0x20, 11);
+				auto nm = fn.find_last_of('.');
+				if (nm == std::string::npos) {
+					nm = fn.length();
+				}
+				auto data = fn.c_str();
+				memcpy(fsb + 1, data, nm > 8 ? 8 : nm);
+				if (nm < fn.length()) {
+					auto s = fn.length() - nm;
+					memcpy(fsb + 9, &data[nm + 1], s > 3 ? 3 : s);
+				}
+				*(fsb + 12) = itemFsb;
+				uint8_t blockSize = fileSize > 0 ? (fileSize / 128) >= 0x80 ? 0x80 : (fileSize / 128 + 1) : 0;
+				if (blockSize == 0x80) {
+					force = true;
+					itemFsb++;
+				}
+				*(fsb + 15) = blockSize;
+				if (blockSize * 128 >= fileSize) {
+					fileSize = 0;
+				}
+				else {
+					fileSize -= (blockSize * 128);
+				}
+				uint8_t index = 16;
+				while (blockSize > 0) {
+					auto dst = getPointerByBlock(emptyBlocks.at(itemBlock));
+					*(fsb + index) = emptyBlocks.at(itemBlock);
+					index++;
+					itemBlock++;
+					uint16_t length = blockSize > 8 ? 1024 : blockSize * 128;
+					blockSize -= blockSize > 8 ? 8 : blockSize;
+					memcpy(dst, curBuff, length);
+					curBuff += length;
+				}
+			}
+			delete[] buffer;
+		}
+	}
 }

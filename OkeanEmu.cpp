@@ -9,6 +9,7 @@
 #include <windows.h>
 #include <shobjidl.h> 
 #include <codecvt>
+#include <fstream>
 
 #define MAX_LOADSTRING 100
 
@@ -16,9 +17,12 @@
 HINSTANCE hInst;                                // current instance
 WCHAR szTitle[MAX_LOADSTRING];                  // The title bar text
 WCHAR szWindowClass[MAX_LOADSTRING];            // the main window class name
-
-std::string monitor;
-std::string os;
+std::string monitor = "";
+std::string os = "";
+//std::string monitor = "C:/work/project/OkeanEmu/OKEAN240_1(MON).BIN";
+//std::string os = "C:/work/project/OkeanEmu/OKEAN240_2(CPM).BIN";
+//std::string monitor = "C:/work/project/OkeanEmu/okean240/emu/Okean240/MONITOR.BIN";
+//std::string os = "C:/work/project/OkeanEmu/okean240/emu/Okean240/CPM80.BIN";
 
 // Forward declarations of functions included in this code module:
 ATOM                MyRegisterClass(HINSTANCE hInstance);
@@ -176,6 +180,7 @@ void prepareOkeanScreen(HDC hdcTemp) {
 	}
 	delete[] bitmap;
 }
+
 // Message handler for about box.
 INT_PTR CALLBACK About(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 {
@@ -201,10 +206,12 @@ void AddMenus(HWND hwnd) {
 	HMENU hMenubar;
 	HMENU hMenu;
 	HMENU hPlayerMenu;
+	HMENU hUtilMenu;
 
 	hMenubar = CreateMenu();
 	hMenu = CreateMenu();
 	hPlayerMenu = CreateMenu();
+	hUtilMenu = CreateMenu();
 
 	AppendMenuW(hMenu, MF_STRING, IDC_OKEANEMU_MONITOR, L"&File Monitor");
 	AppendMenuW(hMenu, MF_STRING, IDC_OKEANEMU_OS, L"&File OS");
@@ -216,6 +223,10 @@ void AddMenus(HWND hwnd) {
 	AppendMenuW(hPlayerMenu, MF_STRING, IDC_FILE_FOR_PLAYER, L"&File for Record Player");
 	AppendMenuW(hPlayerMenu, MF_STRING, IDC_PLAYER_START, L"&Start Record Player");
 	AppendMenuW(hMenubar, MF_POPUP, (UINT_PTR)hPlayerMenu, L"&Record Player");
+	AppendMenuW(hUtilMenu, MF_STRING, IDC_FILE_COPY_TO_HOST, L"&Copy file to host");
+	AppendMenuW(hUtilMenu, MF_STRING, IDC_FILE_COPY_TO_OKEAN, L"&Copy file to Okean240");
+	AppendMenuW(hMenubar, MF_POPUP, (UINT_PTR)hUtilMenu, L"&Utilites");
+
 	AppendMenuW(hMenubar, MF_STRING, IDM_ABOUT, L"&About");
 	SetMenu(hwnd, hMenubar);
 }
@@ -276,6 +287,43 @@ std::string fileOpenDialog() {
 	return pszFilePath;
 }
 
+
+HRESULT CreateDialogToPickFolder(HWND hWnd)
+{
+	IFileOpenDialog* pPickFolderDialog = NULL;
+	IShellItem* pPickedFolder = NULL;
+	HRESULT hr = CoCreateInstance(CLSID_FileOpenDialog, NULL, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&pPickFolderDialog));
+
+	if (SUCCEEDED(hr))
+	{
+		DWORD dialogOptions;
+		hr = pPickFolderDialog->GetOptions(&dialogOptions);
+		if (SUCCEEDED(hr))
+		{
+			hr = pPickFolderDialog->SetOptions(dialogOptions | FOS_PICKFOLDERS);
+			if (SUCCEEDED(hr))
+			{
+				hr = pPickFolderDialog->Show(hWnd);
+				if (SUCCEEDED(hr))
+				{
+					hr = pPickFolderDialog->GetResult(&pPickedFolder);
+					if (SUCCEEDED(hr))
+					{
+						PWSTR pszFolderPath = NULL;
+						hr = pPickedFolder->GetDisplayName(SIGDN_FILESYSPATH, &pszFolderPath);
+						if (SUCCEEDED(hr))
+						{
+							okeanBus->copyFilesToHost(ConvertLPCWSTRToString(pszFolderPath));
+						}
+					}
+					pPickedFolder->Release();
+				}
+			}
+		}
+		pPickFolderDialog->Release();
+	}
+	return hr;
+}
 //
 //  FUNCTION: WndProc(HWND, UINT, WPARAM, LPARAM)
 //
@@ -327,7 +375,17 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 					okeanBus->startRecordPlayer();
 				}
 				break;
-
+			case IDC_FILE_COPY_TO_HOST:
+				if (okeanBus != nullptr) {
+					CreateDialogToPickFolder(hWnd);
+				}
+				break;
+			case IDC_FILE_COPY_TO_OKEAN:
+				if (okeanBus != nullptr) {
+					auto fileFoPlayer = fileOpenDialog();
+					okeanBus->copyFilesFromHost(fileFoPlayer);
+				}
+				break;
 			default:
                 return DefWindowProc(hWnd, message, wParam, lParam);
             }

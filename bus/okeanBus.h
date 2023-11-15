@@ -4,6 +4,7 @@
 #include <array>
 #include <memory>
 #include <functional>
+#include <vector>
 
 #include "../cpu/IO.hpp"
 #include "../cpu/cpu.hpp"
@@ -17,6 +18,7 @@
 class OkeanBus : public IO<uint8_t>, public std::enable_shared_from_this<OkeanBus> {
 public:
 	enum class EventType { VIDEO, RECORD_PLAYER };
+	enum class ExtRAMBank { BANK1, BANK2, BANK3};
 	using BusEvent = std::function< void(EventType type) >;
 	OkeanBus();
 	virtual ~OkeanBus() = default;
@@ -30,13 +32,24 @@ public:
 	void loadFileToRecordPlayer(std::string filename);
 	void startRecordPlayer();
 	RecordPlayer::PlaySatus getRecordPlayerStatus(double_t &percent);
+	void copyFilesToHost(std::string path);
+	void copyFilesFromHost(std::string path);
 private:
+	typedef struct {
+		std::string fileName;
+		std::vector<uint8_t> blocks;
+		uint16_t sizeInBlocks;
+	} FSBRecord;
 	uint8_t ports[256];
 	std::shared_ptr<K580VI53> m_k580vi53;
 	std::shared_ptr<K580VN59> m_k580vn59;
 	std::shared_ptr<K580VV55> m_k580vv55_keyb;
 	std::shared_ptr<RecordPlayer> m_recordPlayer;
-
+	uint8_t* getExtendedRAM(ExtRAMBank bank);
+	bool getFileRecord(FSBRecord &record, uint8_t next, uint8_t numRecord = 0, std::string fileName = "");
+	uint8_t* getPointerByBlock(uint8_t block);
+	void prepareEmptyBlocks(std::vector<uint8_t> &emptyFSB, std::vector<uint8_t> &emptyBlocks);
+	std::string getFileName(std::string fullName);
 
 	enum class MemoryType { MONITOR, OS, VIDEO };
 
@@ -47,7 +60,11 @@ private:
 		VIDEO1 = 0x01,
 		EXT_RAM1 = 0x02,
 		EXT_RAM2 = 0x03,
-		EXT_RAM3 = 0x12
+		EXT_RAM3 = 0x12,
+		EXT192_RAM1 = 0x04,
+		EXT192_RAM2 = 0x05,
+		EXT192_RAM3 = 0x06,
+		EXT192_RAM4 = 0x07
 	};
 
 	class RAM : public IO<uint16_t>
@@ -60,6 +77,8 @@ private:
 		uint8_t VIDEO_RAM[BLOCK_SIZE];
 		uint8_t NORM_RAM[BLOCK_SIZE * 3];
 		uint8_t EXT_RAM[BLOCK_SIZE * 4];
+		uint8_t EXT_RAM1[BLOCK_SIZE * 4];
+		uint8_t EXT_RAM2[BLOCK_SIZE * 4];
 		friend class OkeanBus;
 	private:
 		uint8_t* getMemoryBlock(MemoryType type);
